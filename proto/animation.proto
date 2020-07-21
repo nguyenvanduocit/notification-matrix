@@ -1,0 +1,6 @@
+syntax = "proto3";
+option go_package = ".;animation";
+
+message SetBrightnessArg {
+    int32 brightness = 1;
+}
