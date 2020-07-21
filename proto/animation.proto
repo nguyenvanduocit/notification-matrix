@@ -1,6 +1,13 @@
 syntax = "proto3";
 option go_package = ".;animation";
 
-message SetBrightnessArg {
-    int32 brightness = 1;
+enum AnimationID {
+    SUCCESS = 0;
+    ERROR = 1;
+    LOADING = 2;
+}
+
+message AnimationArg {
+    int32 duration = 1;
+    AnimationID animation_id = 2;
 }
