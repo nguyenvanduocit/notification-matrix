@@ -10,7 +10,7 @@
 #define LED_PIN 3
 #define COLOR_ORDER GRB
 #define CHIPSET WS2811
-#define BRIGHTNESS 5
+#define BRIGHTNESS 20
 #define NUM_LEDS 64
 
 #define kMatrixWidth  8
@@ -29,9 +29,26 @@ public:
         FastLED.show();
     }
 
+    void setAll(byte red, byte green, byte blue) {
+        for(int i = 0; i < NUM_LEDS; i++ ) {
+            setPixel(i, red, green, blue);
+        }
+        showStrip();
+    }
+
+    void showStrip() {
+        FastLED.show();
+    }
+
     void setBrightness(uint8_t scale) {
          FastLED.setBrightness(scale);
          FastLED.show();
+    }
+
+    void setPixel(int Pixel, byte red, byte green, byte blue) {
+        leds[Pixel].r = red;
+        leds[Pixel].g = green;
+        leds[Pixel].b = blue;
     }
 
     uint16_t XY(uint8_t x, uint8_t y)
@@ -54,53 +71,6 @@ public:
         }
 
         return i;
-    }
-
-    void loadingAnimation(unsigned long wait)
-    {
-        for (uint8_t i = 0; i < NUM_LEDS; i++)
-        {
-            leds[i] = CHSV(random8(), 255, 255);
-            FastLED.show();
-            leds[i] = 0x000000;
-            delay(wait);
-        }
-        FastLED.show();
-    }
-
-    void turnOnPixel(uint8_t index, int8_t nr, uint8_t ng, uint8_t nb) {
-        leds[index].r = nr;
-        leds[index].g = ng;
-        leds[index].b = nb;
-        FastLED.show();
-    }
-
-    void successAnimation(unsigned long wait, uint8_t times)
-    {
-        for (uint8_t i = 0; i < 3; i++)
-        {
-            leds.fill_gradient(CHSV(random8(), 255, 255), CHSV(random8(), 255, 255));
-            FastLED.show();
-            FastLED.delay(wait);
-
-            leds.fill_solid(0x000000);
-            FastLED.show();
-            delay(wait);
-        }
-    }
-
-    void errorAnimation(unsigned long wait, uint8_t times)
-    {
-        for (uint8_t i = 0; i < times; i++)
-        {
-            leds.fill_solid(CRGB::Red);
-            FastLED.show();
-            delay(wait);
-
-            leds.fill_solid(0x000000);
-            FastLED.show();
-            delay(wait);
-        }
     }
 };
 

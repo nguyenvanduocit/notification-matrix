@@ -42,11 +42,15 @@ func main() {
 		animationID = animation.AnimationID_ERROR
 	case "loading":
 		animationID = animation.AnimationID_LOADING
+	case "cylonBounce":
+		animationID = animation.AnimationID_CYLON_BOUNCE
+	case "sparkle":
+		animationID = animation.AnimationID_SPARKLE
 	}
 
 	successAnimationArg := &animation.AnimationArg{
 		AnimationId: animationID,
-		Duration:    100,
+		Duration:    50,
 	}
 
 	payload, err := proto.Marshal(successAnimationArg)

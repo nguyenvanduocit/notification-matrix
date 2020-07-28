@@ -5,6 +5,9 @@ enum AnimationID {
     SUCCESS = 0;
     ERROR = 1;
     LOADING = 2;
+    STROBE =  3;
+    CYLON_BOUNCE = 4;
+    SPARKLE = 5;
 }
 
 message AnimationArg {

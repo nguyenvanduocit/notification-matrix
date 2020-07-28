@@ -17,7 +17,10 @@ extern "C" {
 typedef enum _AnimationID {
     AnimationID_SUCCESS = 0,
     AnimationID_ERROR = 1,
-    AnimationID_LOADING = 2
+    AnimationID_LOADING = 2,
+    AnimationID_STROBE = 3,
+    AnimationID_CYLON_BOUNCE = 4,
+    AnimationID_SPARKLE = 5
 } AnimationID;
 
 /* Struct definitions */
@@ -29,8 +32,8 @@ typedef struct _AnimationArg {
 
 /* Helper constants for enums */
 #define _AnimationID_MIN AnimationID_SUCCESS
-#define _AnimationID_MAX AnimationID_LOADING
-#define _AnimationID_ARRAYSIZE ((AnimationID)(AnimationID_LOADING+1))
+#define _AnimationID_MAX AnimationID_SPARKLE
+#define _AnimationID_ARRAYSIZE ((AnimationID)(AnimationID_SPARKLE+1))
 
 
 /* Initializer values for message structs */

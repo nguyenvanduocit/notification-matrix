@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <Matrix.h>
+#include <animation.h>
 #include <PubSubClient.h>
 #include <animation.pb.h>
 #include <brightness.pb.h>
@@ -11,6 +12,7 @@
 /************************* Matrix *********************************/
 
 Matrix matrix = Matrix();
+Animation animation = Animation(&matrix);
 
 /************************* MQTT Setup *********************************/
 
@@ -24,7 +26,7 @@ void brightnessHandler (byte *payload, unsigned int length) {
   if (!pb_decode(&stream, SetBrightnessArg_fields, &message))
   {
     printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
-    matrix.errorAnimation(50, 5);
+    animation.errorAnimation(50, 5);
     return;
   }
   matrix.setBrightness(message.level);
@@ -37,7 +39,7 @@ void iconHandler (byte *payload, unsigned int length) {
   if (!pb_decode(&stream, IconArg_fields, &message))
   {
     printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
-    matrix.errorAnimation(50, 5);
+    animation.errorAnimation(50, 5);
     return;
   }
   Serial.println(message.icon_id);
@@ -51,21 +53,35 @@ void animationHandler (byte *payload, unsigned int length) {
   if (!pb_decode(&stream, AnimationArg_fields, &message))
   {
     printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
-    matrix.errorAnimation(50, 5);
+    animation.errorAnimation(50, 5);
     return;
   }
   if (message.animation_id == AnimationID_SUCCESS)
   {
-    matrix.successAnimation(message.duration, 5);
+    animation.successAnimation(message.duration, 5);
   }
   else if (message.animation_id == AnimationID_ERROR)
   {
-    matrix.errorAnimation(message.duration, 5);
+    animation.errorAnimation(message.duration, 5);
   }
   else if (message.animation_id == AnimationID_LOADING)
   {
-    matrix.loadingAnimation(message.duration);
+    animation.loadingAnimation(message.duration);
   }
+  else if (message.animation_id == AnimationID_STROBE) {
+    animation.strobe(random(255), random(255), random(255), 10, 50, 1000);
+  }
+  else if (message.animation_id == AnimationID_CYLON_BOUNCE) {
+    for(int i = 2; i > 0; i--) {
+      animation.cylonBounce(3, 10, 50);
+    }
+  }
+  else if (message.animation_id == AnimationID_SPARKLE) {
+    for(int i = NUM_LEDS * 5; i > 0; i--) {
+      animation.sparkle(random(255), random(255), random(255), random(50));
+    }
+  }
+  FastLED.clear(true);
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -126,12 +142,12 @@ void setup()
 
   while (WiFi.status() != WL_CONNECTED)
   {
-    matrix.loadingAnimation(50);
+    animation.loadingAnimation(10);
   }
 
   Serial.println("Wifi connectected!");
 
-  matrix.successAnimation(500, 3);
+  animation.successAnimation(50, 3);
 
   // Setup MQTT
   client.setServer(MQTT_BROKER_ADDRESS, MQTT_BROKER_PORT);
