@@ -1,100 +1,223 @@
 #include <config.h>
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <Matrix.h>
-#include <animation.h>
+#include <EEPROM.h>
 #include <PubSubClient.h>
 #include <animation.pb.h>
-#include <brightness.pb.h>
-#include <icon.pb.h>
 #include <pb_decode.h>
 
-/************************* Matrix *********************************/
+/* #region  Animation Config */
+#include <WS2812FX.h>
+#include <TwinkleFox.h>
+#include <profitSky.h>
 
-Matrix matrix = Matrix();
-Animation animation = Animation(&matrix);
+#define LED_COUNT 192
+#define LED_PIN D7
 
-/************************* MQTT Setup *********************************/
+#define DEFAULT_ANIMATION_DURATION 5000
 
+unsigned long last_change = 0;
+unsigned long now = 0;
+unsigned long animationDuration = 5000;
+
+IdleAnimationArg idleAnimationArg = {FX_MODE_CUSTOM_1, GREEN, 2000, 1};
+boolean isIdle = false;
+WS2812FX ws2812fx = WS2812FX(LED_COUNT, LED_PIN, NEO_RGB + NEO_KHZ800);
+
+void saveIdleAnimation(IdleAnimationArg message){
+  EEPROM.put(0, idleAnimationArg);
+  EEPROM.commit();
+}
+
+void loadIdleAnimation(IdleAnimationArg &message){
+  EEPROM.get(0, message);
+}
+
+void resetIdleAnimation()
+{
+  isIdle = true;
+  animationDuration = DEFAULT_ANIMATION_DURATION;
+  ws2812fx.setSpeed(idleAnimationArg.speed);
+  ws2812fx.setColor(idleAnimationArg.color_id);
+  ws2812fx.setBrightness(idleAnimationArg.brightness);
+  ws2812fx.setMode(idleAnimationArg.animation_id);
+}
+
+/* #endregion */
+
+/* #region  Rotary Config */
+#include <ESPRotary.h>
+
+#define LEFT_ROTARY_PIN1 D1 // => DT
+#define LEFT_ROTARY_PIN2 D2
+
+#define RIGHT_ROTARY_PIN1 D5 // => DT
+#define RIGHT_ROTARY_PIN2 D6
+
+#define CLICKS_PER_STEP 4
+
+#define ROTARY_MODE_CHANGE_BRIGHTNESS 1
+#define ROTARY_MODE_CHANGE_SPEED 2
+#define ROTARY_MODE_CHANGE_ANIMATION 3
+#define ROTARY_MODE_CHANGE_COLOR 4
+
+#define ROTARY_SPEED_MULTIPLE 100
+
+uint leftRotaryMode = ROTARY_MODE_CHANGE_COLOR;
+uint rightRotaryMode = ROTARY_MODE_CHANGE_ANIMATION;
+
+ESPRotary leftRotary = ESPRotary(LEFT_ROTARY_PIN1, LEFT_ROTARY_PIN2, CLICKS_PER_STEP);
+ESPRotary rightRotary = ESPRotary(RIGHT_ROTARY_PIN1, RIGHT_ROTARY_PIN2, CLICKS_PER_STEP);
+
+// on change
+void leftRotate(ESPRotary &r)
+{
+  int position = r.getPosition();
+  if (leftRotaryMode == ROTARY_MODE_CHANGE_BRIGHTNESS) {
+    if (position < 0) {
+      position = 0;
+      r.resetPosition(0);
+    } else if (position > 255) {
+      position = 255;
+      r.resetPosition(255);
+    }
+    idleAnimationArg.brightness = position;
+    ws2812fx.setBrightness(idleAnimationArg.brightness);
+  } else if (leftRotaryMode == ROTARY_MODE_CHANGE_COLOR) {
+    idleAnimationArg.color_id = ws2812fx.color_wheel(ws2812fx.random8());
+    ws2812fx.setColor(idleAnimationArg.color_id);
+  }
+}
+
+void rightRotate(ESPRotary &r)
+{
+  int position = r.getPosition();
+  if (rightRotaryMode == ROTARY_MODE_CHANGE_ANIMATION) {
+    if (position < 0) {
+      position = 0;
+      r.resetPosition(0);
+    } else if (position > MODE_COUNT - 1) {
+      position = MODE_COUNT - 1;
+      r.resetPosition(MODE_COUNT - 1);
+    }
+    idleAnimationArg.animation_id = position;
+    ws2812fx.setMode(idleAnimationArg.animation_id);
+  } else if (rightRotaryMode == ROTARY_MODE_CHANGE_SPEED) {
+    if (position < SPEED_MIN) {
+      position = SPEED_MIN;
+      r.resetPosition(SPEED_MIN);
+    } else if (position > SPEED_MAX) {
+      position = SPEED_MAX;
+      r.resetPosition(SPEED_MAX);
+    }
+    idleAnimationArg.speed = position * ROTARY_SPEED_MULTIPLE;
+    ws2812fx.setSpeed(idleAnimationArg.speed);
+  }
+}
+/* #endregion */
+
+/* #region  Button config */
+#include <Button2.h>
+
+#define LEFT_BUTTON_PIN D3
+#define RIGHT_BUTTON_PIN D4
+
+Button2 leftButton = Button2(LEFT_BUTTON_PIN);
+Button2 rightButton = Button2(RIGHT_BUTTON_PIN);
+
+void changeLeftRotaryMode(Button2 &btn)
+{
+  if (leftRotaryMode == ROTARY_MODE_CHANGE_BRIGHTNESS) {
+    leftRotaryMode = ROTARY_MODE_CHANGE_COLOR;
+    leftRotary.resetPosition(0);
+  } else if (leftRotaryMode == ROTARY_MODE_CHANGE_COLOR) {
+    leftRotaryMode = ROTARY_MODE_CHANGE_BRIGHTNESS;
+    leftRotary.resetPosition(idleAnimationArg.brightness);
+  }
+}
+
+void changeRightRotaryMode(Button2 &btn)
+{
+  if (rightRotaryMode == ROTARY_MODE_CHANGE_ANIMATION) {
+    rightRotaryMode = ROTARY_MODE_CHANGE_SPEED;
+    rightRotary.resetPosition(idleAnimationArg.speed / ROTARY_SPEED_MULTIPLE);
+  } else if (rightRotaryMode == ROTARY_MODE_CHANGE_SPEED) {
+    rightRotaryMode = ROTARY_MODE_CHANGE_ANIMATION;
+    rightRotary.resetPosition(idleAnimationArg.animation_id);
+  }
+}
+/* #endregion */
+
+/* #region  MQTT Config */
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-void brightnessHandler (byte *payload, unsigned int length) {
-  SetBrightnessArg message = SetBrightnessArg_init_zero;
-  pb_istream_t stream = pb_istream_from_buffer(payload, length);
-
-  if (!pb_decode(&stream, SetBrightnessArg_fields, &message))
-  {
-    printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
-    animation.errorAnimation(50, 5);
-    return;
-  }
-  matrix.setBrightness(message.level);
-}
-
-void iconHandler (byte *payload, unsigned int length) {
-  IconArg message = IconArg_init_zero;
-  pb_istream_t stream = pb_istream_from_buffer(payload, length);
-
-  if (!pb_decode(&stream, IconArg_fields, &message))
-  {
-    printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
-    animation.errorAnimation(50, 5);
-    return;
-  }
-  Serial.println(message.icon_id);
-}
-
-
-void animationHandler (byte *payload, unsigned int length) {
+void animationHandler(byte *payload, unsigned int length)
+{
   AnimationArg message = AnimationArg_init_zero;
   pb_istream_t stream = pb_istream_from_buffer(payload, length);
 
   if (!pb_decode(&stream, AnimationArg_fields, &message))
   {
-    printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
-    animation.errorAnimation(50, 5);
+    Serial.printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
+    ws2812fx.setMode(FX_MODE_COLOR_WIPE);
     return;
   }
-  if (message.animation_id == AnimationID_SUCCESS)
+
+  if (message.duration > 0)
   {
-    animation.successAnimation(message.duration, 5);
+    animationDuration = message.duration;
   }
-  else if (message.animation_id == AnimationID_ERROR)
+
+  if (message.speed > 0)
   {
-    animation.errorAnimation(message.duration, 5);
+    ws2812fx.setSpeed(message.speed);
   }
-  else if (message.animation_id == AnimationID_LOADING)
+
+
+  if (message.brightness > 0)
   {
-    animation.loadingAnimation(message.duration);
+    ws2812fx.setBrightness(message.brightness);
   }
-  else if (message.animation_id == AnimationID_STROBE) {
-    animation.strobe(random(255), random(255), random(255), 10, 50, 1000);
+
+  if (message.color_id > 0)
+  {
+    ws2812fx.setColor(message.color_id);
   }
-  else if (message.animation_id == AnimationID_CYLON_BOUNCE) {
-    for(int i = 2; i > 0; i--) {
-      animation.cylonBounce(3, 10, 50);
-    }
+
+  last_change = millis();
+  isIdle = false;
+  ws2812fx.setMode(message.animation_id);
+  Serial.printf("play animation %u for %lums\n", message.animation_id, animationDuration);
+}
+
+void idleAnimationHandler(byte *payload, unsigned int length)
+{
+  IdleAnimationArg message = IdleAnimationArg_init_zero;
+  pb_istream_t stream = pb_istream_from_buffer(payload, length);
+
+  if (!pb_decode(&stream, IdleAnimationArg_fields, &message))
+  {
+    Serial.printf("Decoding failed: %s\n", PB_GET_ERROR(&stream));
+    return;
   }
-  else if (message.animation_id == AnimationID_SPARKLE) {
-    for(int i = NUM_LEDS * 5; i > 0; i--) {
-      animation.sparkle(random(255), random(255), random(255), random(50));
-    }
+
+  idleAnimationArg = message;
+  saveIdleAnimation(idleAnimationArg);
+  if (isIdle) {
+    resetIdleAnimation();
   }
-  FastLED.clear(true);
+  skyStars[message.brightness] = true;
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
-  if (strcmp(topic, "notification-matrix/animation") == 0)
+  if (strcmp(topic, "nguyenvanduocit/feeds/matrix-notification.animation") == 0)
   {
     animationHandler(payload, length);
-  } else if (strcmp(topic, "notification-matrix/brightness") == 0)
+  } else if (strcmp(topic, "nguyenvanduocit/feeds/matrix-notification.idle-animation") == 0)
   {
-    brightnessHandler(payload, length);
-  } else if (strcmp(topic, "notification-matrix/icon") == 0)
-  {
-    iconHandler(payload, length);
+    idleAnimationHandler(payload, length);
   }
 }
 
@@ -106,12 +229,16 @@ void reconnectMqtt()
     Serial.print("Attempting MQTT connection...");
     String clientId = "ESP8266Client-";
     clientId += String(random(0xffff), HEX);
+#ifdef MQTT_USER
+    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD))
+#else
     if (client.connect(clientId.c_str()))
+#endif
     {
       Serial.println("connected");
-      client.subscribe("notification-matrix/animation", 0);
-      client.subscribe("notification-matrix/brightness", 0);
-      client.subscribe("notification-matrix/icon", 0);
+      client.subscribe("nguyenvanduocit/feeds/matrix-notification.animation", 0);
+      client.subscribe("nguyenvanduocit/feeds/matrix-notification.idle-animation", 0);
+      Serial.println("Subscribed");
     }
     else
     {
@@ -120,19 +247,37 @@ void reconnectMqtt()
       Serial.println(" try again in 5 seconds");
       delay(5000);
     }
+    ws2812fx.service();
   }
 }
-
-/************************* Main *********************************/
+/* #endregion */
 
 void setup()
 {
   Serial.begin(115200);
-  delay(10);
-  // setup matrix
-  matrix.setup();
+  delay(100);
+  EEPROM.begin(512);
 
-  // Setup Wifi
+ /* #region  Setup Rotaty */
+  leftRotary.setChangedHandler(leftRotate);
+  rightRotary.setChangedHandler(rightRotate);
+  /* #endregion */
+
+  /* #region  Settup Buttons */
+  leftButton.setTapHandler(changeLeftRotaryMode);
+  rightButton.setTapHandler(changeRightRotaryMode);
+  /* #endregion */
+
+  /* #region  Settup Animation */
+  loadIdleAnimation(idleAnimationArg);
+  ws2812fx.init();
+  ws2812fx.setCustomMode(F("twinkleFox"), twinkleFox);
+  ws2812fx.setCustomMode(F("profitSky"),profitSky);
+  resetIdleAnimation();
+  ws2812fx.start();
+  /* #endregion */
+
+  /* #region  Setup Wifi */
   WiFi.disconnect();
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.mode(WIFI_STA);
@@ -142,23 +287,49 @@ void setup()
 
   while (WiFi.status() != WL_CONNECTED)
   {
-    animation.loadingAnimation(10);
+    delay(500);
+    Serial.print(".");
+    ws2812fx.service();
   }
 
   Serial.println("Wifi connectected!");
+  Serial.println(WiFi.localIP());
+  /* #endregion */
 
-  animation.successAnimation(50, 3);
-
-  // Setup MQTT
+  /* #region  Setup MQTT */
   client.setServer(MQTT_BROKER_ADDRESS, MQTT_BROKER_PORT);
   client.setCallback(mqttCallback);
+  last_change = millis();
+  /* #endregion */
+
 }
 
 void loop()
 {
+  /* #region  Mqtt Loop */
   if (!client.connected())
   {
     reconnectMqtt();
   }
   client.loop();
+  /* #endregion */
+
+  /* #region  Button Loop */
+  leftButton.loop();
+  rightButton.loop();
+  /* #endregion */
+
+  /* #region  Rotaty loop */
+  leftRotary.loop();
+  rightRotary.loop();
+  /* #endregion */
+
+  /* #region  Animation Loop */
+
+  if (millis() - last_change > animationDuration && !isIdle)
+  {
+    resetIdleAnimation();
+  }
+  ws2812fx.service();
+  /* #endregion */
 }

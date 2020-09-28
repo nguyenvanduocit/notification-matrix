@@ -9,5 +9,7 @@
 PB_BIND(AnimationArg, AnimationArg, AUTO)
 
 
+PB_BIND(IdleAnimationArg, IdleAnimationArg, AUTO)
+
 
 

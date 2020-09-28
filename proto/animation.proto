@@ -1,16 +1,17 @@
 syntax = "proto3";
 option go_package = ".;animation";
 
-enum AnimationID {
-    SUCCESS = 0;
-    ERROR = 1;
-    LOADING = 2;
-    STROBE =  3;
-    CYLON_BOUNCE = 4;
-    SPARKLE = 5;
+message AnimationArg {
+    uint32 duration = 1;
+    uint32 animation_id = 2;
+    uint32 color_id = 3;
+    uint32 speed = 4;
+    uint32 brightness = 5;
 }
 
-message AnimationArg {
-    int32 duration = 1;
-    AnimationID animation_id = 2;
+message IdleAnimationArg {
+    uint32 animation_id = 2;
+    uint32 color_id = 3;
+    uint32 speed = 4;
+    uint32 brightness = 5;
 }
